@@ -17,6 +17,8 @@ Commandes disponibles :
 import os
 import logging
 import asyncio
+import atexit
+import tempfile
 from datetime import datetime, timedelta
 
 from telegram import Update, BotCommand
@@ -50,6 +52,54 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+LOCK_FILE_PATH = os.path.join(tempfile.gettempdir(), "dcorp_kpi_bot.lock")
+LOCK_FILE_HANDLE = None
+
+
+def acquire_single_instance_lock() -> bool:
+    """
+    Empêche le lancement de plusieurs instances du bot.
+    Retourne True si le verrou est acquis, sinon False.
+    """
+    global LOCK_FILE_HANDLE
+
+    try:
+        LOCK_FILE_HANDLE = open(LOCK_FILE_PATH, "w", encoding="utf-8")
+    except OSError as e:
+        logger.error("Impossible d'ouvrir le fichier de verrou : %s", e)
+        return False
+
+    try:
+        if os.name == "nt":
+            import msvcrt
+            msvcrt.locking(LOCK_FILE_HANDLE.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(LOCK_FILE_HANDLE.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        logger.error("Une autre instance du bot est déjà en cours d'exécution.")
+        LOCK_FILE_HANDLE.close()
+        LOCK_FILE_HANDLE = None
+        return False
+
+    LOCK_FILE_HANDLE.seek(0)
+    LOCK_FILE_HANDLE.truncate()
+    LOCK_FILE_HANDLE.write(str(os.getpid()))
+    LOCK_FILE_HANDLE.flush()
+    atexit.register(release_single_instance_lock)
+    return True
+
+
+def release_single_instance_lock():
+    """Libère le verrou de l'instance courante."""
+    global LOCK_FILE_HANDLE
+    if not LOCK_FILE_HANDLE:
+        return
+    try:
+        LOCK_FILE_HANDLE.close()
+    except OSError:
+        pass
+    LOCK_FILE_HANDLE = None
 
 
 # ════════════════════════════════════════════════════════════
@@ -527,6 +577,10 @@ async def scheduled_monthly_report(app: Application):
 
 def main():
     """Point d'entrée principal du bot."""
+    if not acquire_single_instance_lock():
+        print("⚠️ Une instance du bot est déjà active. Fermez-la avant de relancer bot.py.")
+        return
+
     if not TELEGRAM_TOKEN:
         logger.error("TELEGRAM_TOKEN non défini dans .env")
         print("❌ Erreur : configurez TELEGRAM_TOKEN dans le fichier .env")
