@@ -1,0 +1,18 @@
+[Unit]
+Description=D-corp KPI Logistique Bot Telegram
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/dcorp_kpi_bot
+ExecStart=/usr/bin/python3 /home/pi/dcorp_kpi_bot/bot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=multi-user.target
